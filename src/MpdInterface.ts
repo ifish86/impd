@@ -19,6 +19,26 @@ type mpdStats = {
         db_playtime: number,
         db_update: number
     };
+    
+type mpdStatus = {
+        repeat: number,
+        random: number,
+        single: number,
+        consume: number,
+        playlist: number,
+        playlistlength: number,
+        mixrampdb: number,
+        state: string,
+        song: number,
+        songid: number,
+        time: number,
+        elapsed: number,
+        bitrate: number,
+        duration: number,
+        audio: string,
+        nextsong: number,
+        nextsongid: number
+    };
 //var cmds: newCmd[] = [];
 var mpdinterface: any;
 
@@ -29,10 +49,11 @@ class MpdInterface {
     socket: any;
     cmds: newCmd[] = [];
     stats: mpdStats;
+    status: mpdStatus;
     connected: boolean;
     
     lastCmdTxTimestamp = 0;
-    cmdTxSpacing = 0.5;
+    cmdTxSpacing = 0.05;
     constructor(p: number, a: string) {
         this.port = p;
         this.addr = a;
@@ -45,7 +66,27 @@ class MpdInterface {
             db_playtime: 0,
             db_update: 0
         };
-        this.connected = true;
+        this.status = {
+            repeat: 0,
+            random: 0,
+            single: 0,
+            consume: 0,
+            playlist: 0,
+            playlistlength: 0,
+            mixrampdb: 0,
+            state: "stop",
+            song: 0,
+            songid: 0,
+            time: 0,
+            elapsed: 0,
+            bitrate: 0,
+            duration: 0,
+            audio: "",
+            nextsong: 0,
+            nextsongid: 0
+        }
+        this.connected = false;
+        
     }
     
     public connect () {
@@ -55,12 +96,18 @@ class MpdInterface {
             var temp = data.toString().split("\n");
             console.log('Mpd Rx:'+temp[0]);
             MpdInterface.processResponse(data.toString());
+            mpdinterface.processCmdQueue(true);
         });
         
         this.socket.on('connect', function () {
             console.log('mpd connected!');
-            MpdInterface.writeCmd("stats\n", 'localhost', /^uptime: /, function (data: newCmd) { mpdinterface.decodeStats(data); });
-            MpdInterface.writeCmd("status\n", 'localhost', /^uptime: /, function (data: newCmd) { mpdinterface.decodeStatus(data); });
+            if (!mpdinterface.connected) {
+                MpdInterface.writeCmd("stats\n", 'localhost', /^uptime: /, function (data: newCmd) { mpdinterface.decodeStats(data); });
+                MpdInterface.writeCmd("status\n", 'localhost', /^repeat: /, function (data: newCmd) { mpdinterface.decodeStatus(data); });
+                mpdinterface.connected=true;
+            } else {
+                console.log('reconnecting!');
+            }
         });
         
         this.socket.on('close', function () {
@@ -80,7 +127,7 @@ class MpdInterface {
         console.log(cmd);
         //var timestamp = new Date().getTime()/1000;
         mpdinterface.cmds[mpdinterface.cmds.length] = {cmd: cmd, response: "", txtime: 0, rxtime: 0, client: client, find: find, callback: callback};
-        mpdinterface.processCmdQueue(true);
+        //mpdinterface.processCmdQueue(true);
     }
     
     private processCmdQueue(yup: boolean) {
@@ -102,9 +149,13 @@ class MpdInterface {
     static processResponse(data: string) {
         var timestamp = new Date().getTime()/1000;
         if (mpdinterface.cmds.length > 0) {
+            console.log(mpdinterface.cmds);
+            console.log(data);
             for (var i = 0; i < mpdinterface.cmds.length; ++i) {
                 if (mpdinterface.cmds[i].txtime != 0 && mpdinterface.cmds[i].response == "" && mpdinterface.cmds[i].find.test(data)) {
-                    console.log('matched');
+                    //console.log('matched');
+                    console.log('TEST');
+                    console.log(mpdinterface.cmds[i].find.test(data));
                     mpdinterface.cmds[i].response = data;
                     mpdinterface.cmds[i].rxtime = timestamp;
                     mpdinterface.cmds[i].callback(mpdinterface.cmds[i]);
@@ -127,7 +178,13 @@ class MpdInterface {
     }
     
     private decodeStatus(data: newCmd) {
-        console.log('sort status');
+        var temp = data.response.split("\n");
+        for (var i = 0; temp[i]; ++i) {
+            var values = temp[i].split(': ');
+            if (values.length > 1) {
+                mpdinterface.status[values[0]]=values[1]
+            }
+        }
     }
     
     public test() {
