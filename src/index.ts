@@ -1,13 +1,15 @@
 import MpdInterface = require('./MpdInterface');
+import MpdClientProxy = require('./MpdClientProxy');
 
 "use strict";
 
 const mpd = new MpdInterface(6600, '192.168.0.190');
+const mpdProxy = new MpdClientProxy(6599);
 
-console.log('hello mpd');
 console.log(mpd.test());
 
 mpd.connect();
+mpdProxy.create();
 
 type mpdStatus = {
         repeat: number,
@@ -42,6 +44,10 @@ mpd.on('currentsong', function (data: any) {
 mpd.on('playlist', function (data: any) {
     console.log('playlist:');
     console.log(data);
+});
+
+mpdProxy.on('data', function (data: string) {
+    console.log('proxy says:'+data);
 });
 
 

@@ -132,7 +132,9 @@ class MpdInterface extends EventEmitter {
         mpdinterface=this;
         this.socket.on('data', function(data: any) {
             var temp = data.toString().split("\n");
-            console.log('Mpd Rx:'+temp[0]);
+            if (temp[0].substr(0,8) != 'repeat: ') {
+                console.log('Mpd Rx:'+temp[0]);
+            }
             MpdInterface.processResponse(data.toString());
             if (temp[0].substr(0,9) == 'OK MPD 0.') {
                 var ver = temp[0].split(' ');
@@ -159,7 +161,9 @@ class MpdInterface extends EventEmitter {
     }
     
     public write(data: string) {
-        console.log('Mpd Tx:'+mpdinterface.cmds.length+';'+data);
+        if (data != 'status') {
+            console.log('Mpd Tx:'+mpdinterface.cmds.length+';'+data);
+        }
         this.socket.write(data+"\n");
     }
     
