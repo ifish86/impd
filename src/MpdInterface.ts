@@ -8,6 +8,7 @@ type newCmd = {
         rxtime: number,
         client: string,
         find: RegExp,
+        socket: any,
         callback: Function
     };
 
@@ -73,11 +74,13 @@ class MpdInterface extends EventEmitter {
     connected: boolean;
     mpdVer: string;
     lastCmdTxTimestamp = 0;
-    cmdTxSpacing = 0.05;
-    constructor(p: number, a: string) {
+    cmdTxSpacing = 0.01;
+    client: string;
+    constructor(p: number, a: string, c: string) {
         super();
         this.port = p;
         this.addr = a;
+        this.client = c;
         this.stats = {
             uptime: 0,
             playtime: 0,
@@ -133,12 +136,13 @@ class MpdInterface extends EventEmitter {
         this.socket.on('data', function(data: any) {
             var temp = data.toString().split("\n");
             if (temp[0].substr(0,8) != 'repeat: ') {
-                console.log('Mpd Rx:'+temp[0]);
+                console.log('Mpd Rx:'+mpdinterface.client+';'+temp[0]);
             }
             MpdInterface.processResponse(data.toString());
             if (temp[0].substr(0,9) == 'OK MPD 0.') {
                 var ver = temp[0].split(' ');
                 mpdinterface.mpdVer = ver[ver.length-1];
+                mpdinterface.emit("mpdver", mpdinterface.mpdVer);
             }
             mpdinterface.processCmdQueue(true);
         });
@@ -146,11 +150,12 @@ class MpdInterface extends EventEmitter {
         this.socket.on('connect', function () {
             console.log('mpd connected!');
             if (!mpdinterface.connected) {
-                MpdInterface.writeCmd("stats", 'localhost', /^uptime: /, function (data: newCmd) { mpdinterface.decodeStats(data); });
-                MpdInterface.writeCmd("status", 'localhost', /^repeat: /, function (data: newCmd) { mpdinterface.decodeStatus(data); });
+                mpdinterface.writeCmd("stats", 'localhost', /^uptime: /, false, function (data: newCmd) { mpdinterface.decodeStats(data); });
+                mpdinterface.writeCmd("status", 'localhost', /^repeat: /, false, function (data: newCmd) { mpdinterface.decodeStatus(data); });
                 mpdinterface.connected=true;
             } else {
                 console.log('reconnecting!');
+                //mpdinterface.writeCmd("status", 'localhost', /^repeat: /, false, function (data: newCmd) { mpdinterface.decodeStatus(data); });
             }
         });
         
@@ -162,14 +167,13 @@ class MpdInterface extends EventEmitter {
     
     public write(data: string) {
         if (data != 'status') {
-            console.log('Mpd Tx:'+mpdinterface.cmds.length+';'+data);
+            console.log('Mpd Tx:'+mpdinterface.client+';'+mpdinterface.cmds.length+';'+data);
         }
         this.socket.write(data+"\n");
     }
     
-    static writeCmd(cmd: string, client: string, find: RegExp, callback: Function) {
-        //var timestamp = new Date().getTime()/1000;
-        mpdinterface.cmds[mpdinterface.cmds.length] = {cmd: cmd, response: "", txtime: 0, rxtime: 0, client: client, find: find, callback: callback};
+    public writeCmd(cmd: string, client: string, find: RegExp, socket: any, callback: Function) {
+        mpdinterface.cmds[mpdinterface.cmds.length] = {cmd: cmd, response: "", txtime: 0, rxtime: 0, client: client, find: find, socket: socket, callback: callback};
         if (mpdinterface.cmds.length > 100) {
             mpdinterface.cmds.shift();
         }
@@ -179,6 +183,7 @@ class MpdInterface extends EventEmitter {
     }
     
     private processCmdQueue(yup: boolean) {
+        //console.log('.');
         var timestamp = new Date().getTime()/1000;
         if (mpdinterface.cmds.length > 0) {
             for (var i = 0; i < mpdinterface.cmds.length; ++i) {
@@ -186,6 +191,17 @@ class MpdInterface extends EventEmitter {
                     mpdinterface.lastCmdTxTimestamp=timestamp;
                     mpdinterface.cmds[i].txtime=timestamp;
                     mpdinterface.write(mpdinterface.cmds[i].cmd);
+                    
+                    if (mpdinterface.cmds[i].cmd.substr(0,4) == 'idle' || mpdinterface.cmds[i].cmd.substr(0,6) == 'noidle') {
+                        
+                        mpdinterface.cmds[i].rxtime=timestamp;
+                        //mpdinterface.cmds[i].response=mpdinterface.cmds[i].cmd;
+                        mpdinterface.cmds[i].response="OK\n";
+                        //insert callback trip if needed!
+                        //callback({cmd: cmd, response: response, txtime: 0, rxtime: 0, client: client, find: find, socket: socket, callback: callback});
+                        mpdinterface.cmds[i].callback(mpdinterface.cmds[i]);
+                    }
+                    
                 } else if (mpdinterface.cmds[i].txtime == 0 && mpdinterface.cmds[i].response == "" && mpdinterface.lastCmdTxTimestamp > (timestamp - mpdinterface.cmdTxSpacing)) {
                     setTimeout(function () { mpdinterface.processCmdQueue(true); }, (mpdinterface.cmdTxSpacing * 1000));
                 }
@@ -232,9 +248,9 @@ class MpdInterface extends EventEmitter {
             }
             
             if (mpdinterface.status[values[0]] != values[1] && values[0] == 'playlist') {
-                MpdInterface.writeCmd("playlistinfo", 'localhost', /^file: /, function (data: newCmd) { mpdinterface.decodePlaylistinfo(data); });
+                mpdinterface.writeCmd("playlistinfo", 'localhost', /^file: /, false, function (data: newCmd) { mpdinterface.decodePlaylistinfo(data); });
             } else if (mpdinterface.status[values[0]] != values[1] && values[0] == 'songid') {
-                MpdInterface.writeCmd("currentsong", 'localhost', /^file: /, function (data: newCmd) { mpdinterface.decodeCurrentsong(data); });
+                mpdinterface.writeCmd("currentsong", 'localhost', /^file: /, false, function (data: newCmd) { mpdinterface.decodeCurrentsong(data); });
             }
             
             if (values.length > 1) {
@@ -250,7 +266,7 @@ class MpdInterface extends EventEmitter {
         if (pushUpdate) {
             this.emit("status", mpdinterface.status);
         }
-        setTimeout(function () { MpdInterface.writeCmd("status", 'localhost', /^repeat: /, function (data: newCmd) { mpdinterface.decodeStatus(data); }); }, (mpdinterface.cmdTxSpacing*10000));
+        setTimeout(function () { mpdinterface.writeCmd("status", 'localhost', /^repeat: /, false, function (data: newCmd) { mpdinterface.decodeStatus(data); }); }, (mpdinterface.cmdTxSpacing*10000));
     }
     
     private decodeCurrentsong(data: newCmd) {
